@@ -113,3 +113,16 @@ a.desc:after {
 .nav > li > form > button.logout:focus {
     outline: none;
 }
+table tbody tr.select:hover {
+    cursor: pointer;
+    cursor: hand;
+    color: #216a94;
+}
+table tbody tr td:first-child:hover {
+    cursor: auto;
+    color: initial;
+}
+.active {
+    font-weight: bold;
+    color:#337ab7;
+}

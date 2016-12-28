@@ -8,7 +8,7 @@ use yii\base\Model;
 /**
  * ContactForm is the model behind the contact form.
  */
-class ContactForm extends Model
+class MailForm extends Model
 {
     public $email;
     public $subject;
@@ -27,12 +27,21 @@ class ContactForm extends Model
         ];
     }
 
+    public function attributeLabels()
+    {
+        return [
+            'email' => 'Получатель',
+            'subject' => 'Тема письма',
+            'body' => 'Текст письма',
+        ];
+    }
+
     /**
      * Sends an email to the specified email address using the information collected by this model.
      * @param string $email the target email address
      * @return bool whether the model passes validation
      */
-    public function contact($email)
+    public function send($email)
     {
         if ($this->validate()) {
             Yii::$app->mailer->compose()

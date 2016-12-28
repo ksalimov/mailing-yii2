@@ -3,40 +3,16 @@
 namespace app\controllers;
 
 use Yii;
-use yii\filters\AccessControl;
+use yii\data\ArrayDataProvider;
+use yii\data\ActiveDataProvider;
 use yii\web\Controller;
-use yii\filters\VerbFilter;
-use app\models\LoginForm;
-use app\models\ContactForm;
+
+use app\models\SentMail;
+use app\models\MailForm;
+use app\models\GmailInbox;
 
 class SiteController extends Controller
 {
-    /**
-     * @inheritdoc
-     */
-    public function behaviors()
-    {
-        return [
-            'access' => [
-                'class' => AccessControl::className(),
-                'only' => ['logout'],
-                'rules' => [
-                    [
-                        'actions' => ['logout'],
-                        'allow' => true,
-                        'roles' => ['@'],
-                    ],
-                ],
-            ],
-            'verbs' => [
-                'class' => VerbFilter::className(),
-                'actions' => [
-                    'logout' => ['post'],
-                ],
-            ],
-        ];
-    }
-
     /**
      * @inheritdoc
      */
@@ -45,10 +21,6 @@ class SiteController extends Controller
         return [
             'error' => [
                 'class' => 'yii\web\ErrorAction',
-            ],
-            'captcha' => [
-                'class' => 'yii\captcha\CaptchaAction',
-                'fixedVerifyCode' => YII_ENV_TEST ? 'testme' : null,
             ],
         ];
     }
@@ -60,66 +32,134 @@ class SiteController extends Controller
      */
     public function actionIndex()
     {
-        return $this->render('index');
-    }
+        $gmailInbox = new GmailInbox();
+        $mail = $gmailInbox->fetchMail();
 
-    /**
-     * Login action.
-     *
-     * @return string
-     */
-    public function actionLogin()
-    {
-        if (!Yii::$app->user->isGuest) {
-            return $this->goHome();
+        $box = null;
+        if(Yii::$app->request->get('box')) {
+            $box = Yii::$app->request->get('box');
+            Yii::$app->session->set('box', $box);
+        } else {
+            $box = 'inbox';
+            Yii::$app->session->set('box', 'inbox');
         }
 
-        $model = new LoginForm();
-        if ($model->load(Yii::$app->request->post()) && $model->login()) {
-            return $this->goBack();
+        $dataProvider = null;
+        if($box == 'inbox') {
+            Yii::$app->session->set('box', 'inbox');
+            $dataProvider = new ArrayDataProvider([
+                'id' => 'inbox',
+                'allModels' => $mail,
+                'pagination' => [
+                    'pageSize' => 20,
+                ],
+                'sort' => [
+                    'attributes' => [
+                        'from',
+                        'subject',
+                        'date',
+                    ],
+                    'defaultOrder' => [
+                        'date' => SORT_DESC,
+                    ]
+                ],
+            ]);
+        } else {
+            Yii::$app->session->set('box', 'sent');
+
+            $query = SentMail::find();
+
+            $dataProvider = new ActiveDataProvider([
+                'id' => 'sent',
+                'query' => $query,
+                'pagination' => [
+                    'pageSize' => 20,
+                ],
+                'sort' => [
+                    'defaultOrder' => [
+                        'date' => SORT_DESC,
+                    ]
+                ],
+            ]);
         }
-        return $this->render('login', [
-            'model' => $model,
+
+        return $this->render('index', [
+            'dataProvider' => $dataProvider,
+            'box' => $box,
         ]);
     }
 
     /**
-     * Logout action.
+     * Displays mail page.
      *
      * @return string
      */
-    public function actionLogout()
+    public function actionMail()
     {
-        Yii::$app->user->logout();
+        $model = new MailForm();
+        if ($model->load(Yii::$app->request->post()) && $model->send(Yii::$app->params['adminEmail'])) {
+            Yii::$app->session->setFlash('mailFormSubmitted');
+
+            $mail = new SentMail();
+            $mail->sender = Yii::$app->params['adminEmail'];
+            $mail->receiver = $model->email;
+            $mail->subject = $model->subject;
+            $mail->body = $model->body;
+            $mail->date = date_timestamp_get(new \DateTime());
+            $mail->save();
+
+            return $this->refresh();
+        }
+        return $this->render('mail', [
+            'model' => $model,
+        ]);
+    }
+
+    /*
+     * Deletes messages and redirects to home page.
+     *
+     * @return string
+     */
+    public function actionDelete()
+    {
+        if(Yii::$app->session->get('box') == 'inbox') {
+            $ids = Yii::$app->request->post('ids');
+            $gmailInbox = new GmailInbox();
+            $gmailInbox->deleteMessages($ids);
+        } else {
+            $keys = Yii::$app->request->post('keylist');
+            if($keys) {
+                foreach ($keys as $key) {
+                    $mail = SentMail::findOne($key);
+                    $mail->delete();
+                }
+            }
+        }
 
         return $this->goHome();
     }
 
-    /**
-     * Displays contact page.
+    /*
+     * Displays message page.
      *
      * @return string
      */
-    public function actionContact()
+    public function actionMessage()
     {
-        $model = new ContactForm();
-        if ($model->load(Yii::$app->request->post()) && $model->contact(Yii::$app->params['adminEmail'])) {
-            Yii::$app->session->setFlash('contactFormSubmitted');
+        $box = Yii::$app->session->get('box');
+        $msgno = Yii::$app->request->get('id');
+        $model = null;
 
-            return $this->refresh();
+        if($box == 'inbox') {
+            $gmailInbox = new GmailInbox();
+            $model = $gmailInbox->fetchMessage($msgno);
+        } elseif ($box == 'sent') {
+            $model = SentMail::findOne($msgno);
         }
-        return $this->render('contact', [
-            'model' => $model,
-        ]);
-    }
 
-    /**
-     * Displays about page.
-     *
-     * @return string
-     */
-    public function actionAbout()
-    {
-        return $this->render('about');
+        return $this->render('message', [
+            'model' => $model,
+            'box' => $box,
+        ]);
     }
 }
